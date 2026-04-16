@@ -75,6 +75,19 @@ export interface RiskFormInput {
   dueDate: string;
 }
 
+export interface FileFormInput {
+  projectId: string;
+  versionId: string;
+  fileName: string;
+  fileType: string;
+  fileCategory: string;
+  fileUrl: string;
+  sourcePlatform: string;
+  uploader: string;
+  isPinned: boolean;
+  remark: string;
+}
+
 export interface RepositoryWriteResult<T> {
   success: boolean;
   data?: T;
@@ -353,6 +366,21 @@ function toRiskPayload(input: RiskFormInput) {
   };
 }
 
+function toFilePayload(input: FileFormInput) {
+  return {
+    project_id: text(input.projectId).trim(),
+    version_id: nullableText(input.versionId),
+    file_name: text(input.fileName).trim(),
+    file_type: nullableText(input.fileType),
+    file_category: nullableText(input.fileCategory),
+    file_url: text(input.fileUrl).trim(),
+    source_platform: nullableText(input.sourcePlatform),
+    uploader: nullableText(input.uploader),
+    is_pinned: Boolean(input.isPinned),
+    remark: nullableText(input.remark),
+  };
+}
+
 function fallbackProjectDetail(id: string): ProjectDetailData | null {
   const project = getProjectById(id);
   if (!project) {
@@ -540,6 +568,37 @@ export async function getFiles(): Promise<ProjectFileItem[]> {
     return ((data ?? []) as FileRow[]).map(mapFileRow);
   } catch {
     return mockFiles;
+  }
+}
+
+export async function getFileById(
+  id: string
+): Promise<ProjectFileItem | null> {
+  noStore();
+
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return mockFiles.find((item) => item.id === id) ?? null;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("project_files")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return mapFileRow(data as FileRow);
+  } catch {
+    return mockFiles.find((item) => item.id === id) ?? null;
   }
 }
 
@@ -863,5 +922,113 @@ export async function updateRisk(
   return {
     success: true,
     data: mapRiskRow(data as RiskRow),
+  };
+}
+
+export async function createFile(
+  input: FileFormInput
+): Promise<RepositoryWriteResult<ProjectFileItem>> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return {
+      success: false,
+      message: "Supabase 环境变量未配置，无法写入文件。",
+    };
+  }
+
+  const payload = toFilePayload(input);
+
+  if (!payload.project_id) {
+    return {
+      success: false,
+      message: "请选择所属项目。",
+    };
+  }
+
+  if (!payload.file_name) {
+    return {
+      success: false,
+      message: "文件名称不能为空。",
+    };
+  }
+
+  if (!payload.file_url) {
+    return {
+      success: false,
+      message: "文件链接不能为空。",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("project_files")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    return {
+      success: false,
+      message: error.message,
+    };
+  }
+
+  return {
+    success: true,
+    data: mapFileRow(data as FileRow),
+  };
+}
+
+export async function updateFile(
+  id: string,
+  input: FileFormInput
+): Promise<RepositoryWriteResult<ProjectFileItem>> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) {
+    return {
+      success: false,
+      message: "Supabase 环境变量未配置，无法更新文件。",
+    };
+  }
+
+  const payload = toFilePayload(input);
+
+  if (!payload.project_id) {
+    return {
+      success: false,
+      message: "请选择所属项目。",
+    };
+  }
+
+  if (!payload.file_name) {
+    return {
+      success: false,
+      message: "文件名称不能为空。",
+    };
+  }
+
+  if (!payload.file_url) {
+    return {
+      success: false,
+      message: "文件链接不能为空。",
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("project_files")
+    .update(payload)
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    return {
+      success: false,
+      message: error.message,
+    };
+  }
+
+  return {
+    success: true,
+    data: mapFileRow(data as FileRow),
   };
 }
