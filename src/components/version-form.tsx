@@ -1,55 +1,13 @@
-import "server-only";
+"use client";
 
-import { unstable_noStore as noStore } from "next/cache";
-import {
-  getFilesByProjectId,
-  getProjectById,
-  getRisksByProjectId,
-  getTasksByProjectId,
-  getVersionsByProjectId,
-  mockFiles,
-  mockProjects,
-  mockRisks,
-  mockVersions,
-} from "@/lib/mock";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
-import type {
-  ProjectFileItem,
-  ProjectItem,
-  ProjectRiskItem,
-  ProjectStatus,
-  ProjectTaskItem,
-  ProjectVersionItem,
-  RiskLevel,
-} from "@/types/project";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-export interface ProjectDetailData {
-  project: ProjectItem;
-  versions: ProjectVersionItem[];
-  tasks: ProjectTaskItem[];
-  files: ProjectFileItem[];
-  risks: ProjectRiskItem[];
-}
+type VersionFormMode = "create" | "edit";
 
-export interface ProjectFormInput {
-  name: string;
-  shortName: string;
-  type: string;
-  platform: string;
-  status: string;
-  progressPercent: number;
-  currentVersion: string;
-  owner: string;
-  operatorOwner: string;
-  testOwner: string;
-  launchPlanDate: string;
-  actualLaunchDate: string;
-  riskLevel: string;
-  blocker: string;
-  summary: string;
-}
-
-export interface VersionFormInput {
+export interface VersionFormValues {
+  id?: string;
   projectId: string;
   versionNo: string;
   versionName: string;
@@ -64,655 +22,367 @@ export interface VersionFormInput {
   remark: string;
 }
 
-export interface RepositoryWriteResult<T> {
-  success: boolean;
-  data?: T;
-  message?: string;
-}
-
-type ProjectRow = {
+interface VersionProjectOption {
   id: string;
   name: string;
-  short_name: string | null;
-  type: string | null;
-  platform: string | null;
-  status: string | null;
-  progress_percent: number | null;
-  current_version: string | null;
-  owner: string | null;
-  operator_owner: string | null;
-  test_owner: string | null;
-  launch_plan_date: string | null;
-  actual_launch_date: string | null;
-  risk_level: string | null;
-  blocker: string | null;
-  summary: string | null;
-  updated_at: string | null;
-};
+}
 
-type VersionRow = {
-  id: string;
-  project_id: string;
-  version_no: string;
-  version_name: string | null;
-  status: string | null;
-  progress_percent: number | null;
-  start_date: string | null;
-  test_date: string | null;
-  review_date: string | null;
-  plan_launch_date: string | null;
-  actual_launch_date: string | null;
-  goal: string | null;
-  remark: string | null;
-};
-
-type TaskRow = {
-  id: string;
-  project_id: string;
-  version_id: string | null;
-  title: string;
-  module: string | null;
-  assignee: string | null;
-  start_date: string | null;
-  due_date: string | null;
-  status: string | null;
-  priority: string | null;
-  progress_percent: number | null;
-  risk_note: string | null;
-  remark: string | null;
-};
-
-type FileRow = {
-  id: string;
-  project_id: string;
-  version_id: string | null;
-  file_name: string;
-  file_type: string | null;
-  file_category: string | null;
-  file_url: string;
-  source_platform: string | null;
-  uploader: string | null;
-  is_pinned: boolean | null;
-  remark: string | null;
-  updated_at: string | null;
-};
-
-type RiskRow = {
-  id: string;
-  project_id: string;
-  title: string;
-  level: string | null;
-  type: string | null;
-  description: string | null;
-  owner: string | null;
-  status: string | null;
-  due_date: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-};
-
-const projectStatusList: readonly ProjectStatus[] = [
-  "筹备中",
+const versionStatusOptions = [
+  "需求整理",
   "开发中",
+  "联调中",
   "测试中",
   "提审中",
   "待上线",
   "已上线",
-  "已暂停",
+  "已关闭",
 ];
 
-const riskLevelList: readonly RiskLevel[] = ["低", "中", "高", "严重"];
-
-function normalizeProjectStatus(
-  value: string | null | undefined
-): ProjectStatus {
-  if (value && projectStatusList.includes(value as ProjectStatus)) {
-    return value as ProjectStatus;
+function normalizeDate(value?: string | null) {
+  if (!value) {
+    return "";
   }
-  return "筹备中";
-}
 
-function normalizeRiskLevel(value: string | null | undefined): RiskLevel {
-  if (value && riskLevelList.includes(value as RiskLevel)) {
-    return value as RiskLevel;
+  if (value.length >= 10) {
+    return value.slice(0, 10);
   }
-  return "低";
+
+  return value;
 }
 
-function text(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function nullableText(value: unknown) {
-  const result = text(value).trim();
-  return result ? result : null;
-}
-
-function numberValue(value: unknown, defaultValue = 0) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return defaultValue;
-  }
-  return Math.max(0, Math.min(100, Math.round(parsed)));
-}
-
-function dateValue(value: unknown) {
-  const result = text(value).trim();
-  return result ? result : null;
-}
-
-function mapProjectRow(row: ProjectRow): ProjectItem {
+function createInitialValues(
+  initialValues?: Partial<VersionFormValues>
+): VersionFormValues {
   return {
-    id: row.id,
-    name: row.name,
-    shortName: row.short_name ?? "",
-    type: row.type ?? "",
-    platform: row.platform ?? "",
-    status: normalizeProjectStatus(row.status),
-    progressPercent: row.progress_percent ?? 0,
-    currentVersion: row.current_version ?? "",
-    owner: row.owner ?? "",
-    operatorOwner: row.operator_owner ?? "",
-    testOwner: row.test_owner ?? "",
-    launchPlanDate: row.launch_plan_date ?? "",
-    actualLaunchDate: row.actual_launch_date,
-    riskLevel: normalizeRiskLevel(row.risk_level),
-    blocker: row.blocker ?? "",
-    summary: row.summary ?? "",
-    updatedAt: row.updated_at ?? "",
+    id: initialValues?.id,
+    projectId: initialValues?.projectId ?? "",
+    versionNo: initialValues?.versionNo ?? "",
+    versionName: initialValues?.versionName ?? "",
+    status: initialValues?.status ?? "开发中",
+    progressPercent: initialValues?.progressPercent ?? 0,
+    startDate: normalizeDate(initialValues?.startDate),
+    testDate: normalizeDate(initialValues?.testDate),
+    reviewDate: normalizeDate(initialValues?.reviewDate),
+    planLaunchDate: normalizeDate(initialValues?.planLaunchDate),
+    actualLaunchDate: normalizeDate(initialValues?.actualLaunchDate),
+    goal: initialValues?.goal ?? "",
+    remark: initialValues?.remark ?? "",
   };
 }
 
-function mapVersionRow(row: VersionRow): ProjectVersionItem {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    versionNo: row.version_no,
-    versionName: row.version_name ?? "",
-    status: row.status ?? "",
-    progressPercent: row.progress_percent ?? 0,
-    startDate: row.start_date ?? "",
-    testDate: row.test_date,
-    reviewDate: row.review_date,
-    planLaunchDate: row.plan_launch_date,
-    actualLaunchDate: row.actual_launch_date,
-    goal: row.goal ?? "",
-    remark: row.remark ?? "",
-  };
-}
+export function VersionForm({
+  mode,
+  projects,
+  initialValues,
+}: {
+  mode: VersionFormMode;
+  projects: VersionProjectOption[];
+  initialValues?: Partial<VersionFormValues>;
+}) {
+  const router = useRouter();
+  const [values, setValues] = useState<VersionFormValues>(
+    createInitialValues(initialValues)
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-function mapTaskRow(row: TaskRow): ProjectTaskItem {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    versionId: row.version_id,
-    title: row.title,
-    module: row.module ?? "",
-    assignee: row.assignee ?? "",
-    startDate: row.start_date,
-    dueDate: row.due_date,
-    status: row.status ?? "",
-    priority: row.priority ?? "",
-    progressPercent: row.progress_percent ?? 0,
-    riskNote: row.risk_note ?? "",
-    remark: row.remark ?? "",
-  };
-}
+  const submitLabel = useMemo(() => {
+    return mode === "create" ? "创建版本" : "保存修改";
+  }, [mode]);
 
-function mapFileRow(row: FileRow): ProjectFileItem {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    versionId: row.version_id,
-    fileName: row.file_name,
-    fileType: row.file_type ?? "",
-    fileCategory: row.file_category ?? "",
-    fileUrl: row.file_url,
-    sourcePlatform: row.source_platform ?? "",
-    uploader: row.uploader ?? "",
-    isPinned: Boolean(row.is_pinned),
-    remark: row.remark ?? "",
-    updatedAt: row.updated_at ?? "",
-  };
-}
+  const fieldIds = useMemo(() => {
+    const prefix = values.id ? `version-${values.id}` : "version-new";
 
-function mapRiskRow(row: RiskRow): ProjectRiskItem {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    title: row.title,
-    level: normalizeRiskLevel(row.level),
-    type: row.type ?? "",
-    description: row.description ?? "",
-    owner: row.owner ?? "",
-    status: row.status ?? "",
-    dueDate: row.due_date,
-    createdAt: row.created_at ?? "",
-    updatedAt: row.updated_at ?? "",
-  };
-}
+    return {
+      projectId: `${prefix}-project-id`,
+      versionNo: `${prefix}-version-no`,
+      versionName: `${prefix}-version-name`,
+      status: `${prefix}-status`,
+      progressPercent: `${prefix}-progress-percent`,
+      startDate: `${prefix}-start-date`,
+      testDate: `${prefix}-test-date`,
+      reviewDate: `${prefix}-review-date`,
+      planLaunchDate: `${prefix}-plan-launch-date`,
+      actualLaunchDate: `${prefix}-actual-launch-date`,
+      goal: `${prefix}-goal`,
+      remark: `${prefix}-remark`,
+    };
+  }, [values.id]);
 
-function toProjectPayload(input: ProjectFormInput) {
-  return {
-    name: text(input.name).trim(),
-    short_name: nullableText(input.shortName),
-    type: nullableText(input.type),
-    platform: nullableText(input.platform),
-    status: nullableText(input.status) ?? "筹备中",
-    progress_percent: numberValue(input.progressPercent),
-    current_version: nullableText(input.currentVersion),
-    owner: nullableText(input.owner),
-    operator_owner: nullableText(input.operatorOwner),
-    test_owner: nullableText(input.testOwner),
-    launch_plan_date: dateValue(input.launchPlanDate),
-    actual_launch_date: dateValue(input.actualLaunchDate),
-    risk_level: nullableText(input.riskLevel) ?? "低",
-    blocker: nullableText(input.blocker),
-    summary: nullableText(input.summary),
-  };
-}
-
-function toVersionPayload(input: VersionFormInput) {
-  return {
-    project_id: text(input.projectId).trim(),
-    version_no: text(input.versionNo).trim(),
-    version_name: nullableText(input.versionName),
-    status: nullableText(input.status) ?? "开发中",
-    progress_percent: numberValue(input.progressPercent),
-    start_date: dateValue(input.startDate),
-    test_date: dateValue(input.testDate),
-    review_date: dateValue(input.reviewDate),
-    plan_launch_date: dateValue(input.planLaunchDate),
-    actual_launch_date: dateValue(input.actualLaunchDate),
-    goal: nullableText(input.goal),
-    remark: nullableText(input.remark),
-  };
-}
-
-function fallbackProjectDetail(id: string): ProjectDetailData | null {
-  const project = getProjectById(id);
-  if (!project) {
-    return null;
+  function setField<K extends keyof VersionFormValues>(
+    key: K,
+    value: VersionFormValues[K]
+  ) {
+    setValues((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
   }
 
-  return {
-    project,
-    versions: getVersionsByProjectId(id),
-    tasks: getTasksByProjectId(id),
-    files: getFilesByProjectId(id),
-    risks: getRisksByProjectId(id),
-  };
-}
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-export async function getProjects(): Promise<ProjectItem[]> {
-  noStore();
+    setErrorMessage("");
 
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockProjects;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("projects")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      throw error;
+    if (!values.projectId) {
+      setErrorMessage("请选择所属项目。");
+      return;
     }
 
-    return ((data ?? []) as ProjectRow[]).map(mapProjectRow);
-  } catch {
-    return mockProjects;
+    if (!values.versionNo.trim()) {
+      setErrorMessage("版本号不能为空。");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const url =
+        mode === "create" ? "/api/versions" : `/api/versions/${values.id}`;
+      const method = mode === "create" ? "POST" : "PUT";
+
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...values,
+          progressPercent: Number(values.progressPercent) || 0,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "保存失败。");
+      }
+
+      router.push("/versions");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "保存失败，请稍后重试。"
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-slate-900">版本信息</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            先维护项目版本主表，后面再补更多细节。
+          </p>
+        </div>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <Field id={fieldIds.projectId} label="所属项目 *">
+            <select
+              id={fieldIds.projectId}
+              name="projectId"
+              value={values.projectId}
+              onChange={(e) => setField("projectId", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            >
+              <option value="">请选择项目</option>
+              {projects.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field id={fieldIds.versionNo} label="版本号 *">
+            <input
+              id={fieldIds.versionNo}
+              name="versionNo"
+              value={values.versionNo}
+              onChange={(e) => setField("versionNo", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+              placeholder="例如：1.0.0"
+            />
+          </Field>
+
+          <Field id={fieldIds.versionName} label="版本名称">
+            <input
+              id={fieldIds.versionName}
+              name="versionName"
+              value={values.versionName}
+              onChange={(e) => setField("versionName", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+              placeholder="例如：首发提审版"
+            />
+          </Field>
+
+          <Field id={fieldIds.status} label="版本状态">
+            <select
+              id={fieldIds.status}
+              name="status"
+              value={values.status}
+              onChange={(e) => setField("status", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            >
+              {versionStatusOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field id={fieldIds.progressPercent} label="完成度">
+            <input
+              id={fieldIds.progressPercent}
+              name="progressPercent"
+              type="number"
+              min={0}
+              max={100}
+              value={values.progressPercent}
+              onChange={(e) =>
+                setField("progressPercent", Number(e.target.value) || 0)
+              }
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+              placeholder="0 - 100"
+            />
+          </Field>
+
+          <Field id={fieldIds.startDate} label="开始时间">
+            <input
+              id={fieldIds.startDate}
+              name="startDate"
+              type="date"
+              value={values.startDate}
+              onChange={(e) => setField("startDate", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            />
+          </Field>
+
+          <Field id={fieldIds.testDate} label="提测时间">
+            <input
+              id={fieldIds.testDate}
+              name="testDate"
+              type="date"
+              value={values.testDate}
+              onChange={(e) => setField("testDate", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            />
+          </Field>
+
+          <Field id={fieldIds.reviewDate} label="提审时间">
+            <input
+              id={fieldIds.reviewDate}
+              name="reviewDate"
+              type="date"
+              value={values.reviewDate}
+              onChange={(e) => setField("reviewDate", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            />
+          </Field>
+
+          <Field id={fieldIds.planLaunchDate} label="计划上线时间">
+            <input
+              id={fieldIds.planLaunchDate}
+              name="planLaunchDate"
+              type="date"
+              value={values.planLaunchDate}
+              onChange={(e) => setField("planLaunchDate", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            />
+          </Field>
+
+          <Field id={fieldIds.actualLaunchDate} label="实际上线时间">
+            <input
+              id={fieldIds.actualLaunchDate}
+              name="actualLaunchDate"
+              type="date"
+              value={values.actualLaunchDate}
+              onChange={(e) => setField("actualLaunchDate", e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+            />
+          </Field>
+
+          <div className="md:col-span-2">
+            <Field id={fieldIds.goal} label="版本目标">
+              <textarea
+                id={fieldIds.goal}
+                name="goal"
+                value={values.goal}
+                onChange={(e) => setField("goal", e.target.value)}
+                rows={4}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                placeholder="例如：完成登录、支付、公告、活动接入"
+              />
+            </Field>
+          </div>
+
+          <div className="md:col-span-2">
+            <Field id={fieldIds.remark} label="备注">
+              <textarea
+                id={fieldIds.remark}
+                name="remark"
+                value={values.remark}
+                onChange={(e) => setField("remark", e.target.value)}
+                rows={4}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                placeholder="例如：支付回调要复核"
+              />
+            </Field>
+          </div>
+        </div>
+
+        {errorMessage ? (
+          <div
+            className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+            role="alert"
+          >
+            {errorMessage}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "提交中..." : submitLabel}
+          </button>
+
+          <Link
+            href="/versions"
+            className="inline-flex items-center rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            取消
+          </Link>
+        </div>
+      </div>
+    </form>
+  );
 }
 
-export async function getProjectDetail(
-  id: string
-): Promise<ProjectDetailData | null> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return fallbackProjectDetail(id);
-  }
-
-  try {
-    const [projectRes, versionsRes, tasksRes, filesRes, risksRes] =
-      await Promise.all([
-        supabase.from("projects").select("*").eq("id", id).maybeSingle(),
-        supabase
-          .from("project_versions")
-          .select("*")
-          .eq("project_id", id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("project_tasks")
-          .select("*")
-          .eq("project_id", id)
-          .order("created_at", { ascending: false }),
-        supabase
-          .from("project_files")
-          .select("*")
-          .eq("project_id", id)
-          .order("updated_at", { ascending: false }),
-        supabase
-          .from("project_risks")
-          .select("*")
-          .eq("project_id", id)
-          .order("updated_at", { ascending: false }),
-      ]);
-
-    if (projectRes.error) {
-      throw projectRes.error;
-    }
-
-    if (!projectRes.data) {
-      return null;
-    }
-
-    if (versionsRes.error) {
-      throw versionsRes.error;
-    }
-
-    if (tasksRes.error) {
-      throw tasksRes.error;
-    }
-
-    if (filesRes.error) {
-      throw filesRes.error;
-    }
-
-    if (risksRes.error) {
-      throw risksRes.error;
-    }
-
-    return {
-      project: mapProjectRow(projectRes.data as ProjectRow),
-      versions: ((versionsRes.data ?? []) as VersionRow[]).map(mapVersionRow),
-      tasks: ((tasksRes.data ?? []) as TaskRow[]).map(mapTaskRow),
-      files: ((filesRes.data ?? []) as FileRow[]).map(mapFileRow),
-      risks: ((risksRes.data ?? []) as RiskRow[]).map(mapRiskRow),
-    };
-  } catch {
-    return fallbackProjectDetail(id);
-  }
-}
-
-export async function getVersions(): Promise<ProjectVersionItem[]> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockVersions;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("project_versions")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    return ((data ?? []) as VersionRow[]).map(mapVersionRow);
-  } catch {
-    return mockVersions;
-  }
-}
-
-export async function getVersionById(
-  id: string
-): Promise<ProjectVersionItem | null> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockVersions.find((item) => item.id === id) ?? null;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("project_versions")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      return null;
-    }
-
-    return mapVersionRow(data as VersionRow);
-  } catch {
-    return mockVersions.find((item) => item.id === id) ?? null;
-  }
-}
-
-export async function getFiles(): Promise<ProjectFileItem[]> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockFiles;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("project_files")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    return ((data ?? []) as FileRow[]).map(mapFileRow);
-  } catch {
-    return mockFiles;
-  }
-}
-
-export async function getRisks(): Promise<ProjectRiskItem[]> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockRisks;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("project_risks")
-      .select("*")
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    return ((data ?? []) as RiskRow[]).map(mapRiskRow);
-  } catch {
-    return mockRisks;
-  }
-}
-
-export async function createProject(
-  input: ProjectFormInput
-): Promise<RepositoryWriteResult<ProjectItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法写入项目。",
-    };
-  }
-
-  const payload = toProjectPayload(input);
-
-  if (!payload.name) {
-    return {
-      success: false,
-      message: "项目名称不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("projects")
-    .insert(payload)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapProjectRow(data as ProjectRow),
-  };
-}
-
-export async function updateProject(
-  id: string,
-  input: ProjectFormInput
-): Promise<RepositoryWriteResult<ProjectItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法更新项目。",
-    };
-  }
-
-  const payload = toProjectPayload(input);
-
-  if (!payload.name) {
-    return {
-      success: false,
-      message: "项目名称不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("projects")
-    .update(payload)
-    .eq("id", id)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapProjectRow(data as ProjectRow),
-  };
-}
-
-export async function createVersion(
-  input: VersionFormInput
-): Promise<RepositoryWriteResult<ProjectVersionItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法写入版本。",
-    };
-  }
-
-  const payload = toVersionPayload(input);
-
-  if (!payload.project_id) {
-    return {
-      success: false,
-      message: "请选择所属项目。",
-    };
-  }
-
-  if (!payload.version_no) {
-    return {
-      success: false,
-      message: "版本号不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("project_versions")
-    .insert(payload)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapVersionRow(data as VersionRow),
-  };
-}
-
-export async function updateVersion(
-  id: string,
-  input: VersionFormInput
-): Promise<RepositoryWriteResult<ProjectVersionItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法更新版本。",
-    };
-  }
-
-  const payload = toVersionPayload(input);
-
-  if (!payload.project_id) {
-    return {
-      success: false,
-      message: "请选择所属项目。",
-    };
-  }
-
-  if (!payload.version_no) {
-    return {
-      success: false,
-      message: "版本号不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("project_versions")
-    .update(payload)
-    .eq("id", id)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapVersionRow(data as VersionRow),
-  };
+function Field({
+  id,
+  label,
+  children,
+}: {
+  id: string;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="block">
+      <label
+        htmlFor={id}
+        className="mb-2 block text-sm font-medium text-slate-700"
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
 }
