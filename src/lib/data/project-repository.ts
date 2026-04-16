@@ -16,6 +16,8 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type {
   ProjectFileItem,
   ProjectItem,
+  ProjectStatus,
+  RiskLevel,
   ProjectRiskItem,
   ProjectTaskItem,
   ProjectVersionItem,
@@ -134,6 +136,32 @@ type RiskRow = {
   updated_at: string | null;
 };
 
+const projectStatusList: readonly ProjectStatus[] = [
+  "筹备中",
+  "开发中",
+  "测试中",
+  "提审中",
+  "待上线",
+  "已上线",
+  "已暂停",
+];
+
+const riskLevelList: readonly RiskLevel[] = ["低", "中", "高", "严重"];
+
+function normalizeProjectStatus(value: string | null | undefined): ProjectStatus {
+  if (value && projectStatusList.includes(value as ProjectStatus)) {
+    return value as ProjectStatus;
+  }
+  return "筹备中";
+}
+
+function normalizeRiskLevel(value: string | null | undefined): RiskLevel {
+  if (value && riskLevelList.includes(value as RiskLevel)) {
+    return value as RiskLevel;
+  }
+  return "低";
+}
+
 function text(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -163,7 +191,7 @@ function mapProjectRow(row: ProjectRow): ProjectItem {
     shortName: row.short_name ?? "",
     type: row.type ?? "",
     platform: row.platform ?? "",
-    status: row.status ?? "筹备中",
+    status: normalizeProjectStatus(row.status),
     progressPercent: row.progress_percent ?? 0,
     currentVersion: row.current_version ?? "",
     owner: row.owner ?? "",
@@ -171,7 +199,7 @@ function mapProjectRow(row: ProjectRow): ProjectItem {
     testOwner: row.test_owner ?? "",
     launchPlanDate: row.launch_plan_date ?? "",
     actualLaunchDate: row.actual_launch_date,
-    riskLevel: row.risk_level ?? "低",
+    riskLevel: normalizeRiskLevel(row.risk_level),
     blocker: row.blocker ?? "",
     summary: row.summary ?? "",
     updatedAt: row.updated_at ?? "",
