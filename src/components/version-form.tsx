@@ -64,17 +64,6 @@ export interface VersionFormInput {
   remark: string;
 }
 
-export interface RiskFormInput {
-  projectId: string;
-  title: string;
-  level: string;
-  type: string;
-  description: string;
-  owner: string;
-  status: string;
-  dueDate: string;
-}
-
 export interface RepositoryWriteResult<T> {
   success: boolean;
   data?: T;
@@ -340,19 +329,6 @@ function toVersionPayload(input: VersionFormInput) {
   };
 }
 
-function toRiskPayload(input: RiskFormInput) {
-  return {
-    project_id: text(input.projectId).trim(),
-    title: text(input.title).trim(),
-    level: nullableText(input.level) ?? "低",
-    type: nullableText(input.type),
-    description: nullableText(input.description),
-    owner: nullableText(input.owner),
-    status: nullableText(input.status) ?? "未解决",
-    due_date: dateValue(input.dueDate),
-  };
-}
-
 function fallbackProjectDetail(id: string): ProjectDetailData | null {
   const project = getProjectById(id);
   if (!project) {
@@ -567,37 +543,6 @@ export async function getRisks(): Promise<ProjectRiskItem[]> {
   }
 }
 
-export async function getRiskById(
-  id: string
-): Promise<ProjectRiskItem | null> {
-  noStore();
-
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return mockRisks.find((item) => item.id === id) ?? null;
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from("project_risks")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      return null;
-    }
-
-    return mapRiskRow(data as RiskRow);
-  } catch {
-    return mockRisks.find((item) => item.id === id) ?? null;
-  }
-}
-
 export async function createProject(
   input: ProjectFormInput
 ): Promise<RepositoryWriteResult<ProjectItem>> {
@@ -769,99 +714,5 @@ export async function updateVersion(
   return {
     success: true,
     data: mapVersionRow(data as VersionRow),
-  };
-}
-
-export async function createRisk(
-  input: RiskFormInput
-): Promise<RepositoryWriteResult<ProjectRiskItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法写入风险。",
-    };
-  }
-
-  const payload = toRiskPayload(input);
-
-  if (!payload.project_id) {
-    return {
-      success: false,
-      message: "请选择所属项目。",
-    };
-  }
-
-  if (!payload.title) {
-    return {
-      success: false,
-      message: "风险标题不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("project_risks")
-    .insert(payload)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapRiskRow(data as RiskRow),
-  };
-}
-
-export async function updateRisk(
-  id: string,
-  input: RiskFormInput
-): Promise<RepositoryWriteResult<ProjectRiskItem>> {
-  const supabase = getSupabaseServerClient();
-  if (!supabase) {
-    return {
-      success: false,
-      message: "Supabase 环境变量未配置，无法更新风险。",
-    };
-  }
-
-  const payload = toRiskPayload(input);
-
-  if (!payload.project_id) {
-    return {
-      success: false,
-      message: "请选择所属项目。",
-    };
-  }
-
-  if (!payload.title) {
-    return {
-      success: false,
-      message: "风险标题不能为空。",
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("project_risks")
-    .update(payload)
-    .eq("id", id)
-    .select("*")
-    .single();
-
-  if (error) {
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-
-  return {
-    success: true,
-    data: mapRiskRow(data as RiskRow),
   };
 }
